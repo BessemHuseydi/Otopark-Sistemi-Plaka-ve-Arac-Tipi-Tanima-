@@ -6,7 +6,7 @@ import numpy as np
 from datetime import datetime
 from ultralytics import YOLO
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QLabel, QPushButton, QVBoxLayout,
-                             QWidget, QTableWidget, QTableWidgetItem, QMessageBox)
+                             QWidget, QTableWidget, QTableWidgetItem, QMessageBox, QHBoxLayout)
 from PyQt5.QtCore import QThread, pyqtSignal, Qt
 from PyQt5.QtGui import QImage, QPixmap
 
@@ -31,6 +31,8 @@ def detect_vehicle_type(frame):
 class VideoThread(QThread):
     # Tespit edilen plaka bilgilerini (plaka text, araç tipi, plaka görüntüsü) ana pencereye aktarmak için sinyal
     plateDetected = pyqtSignal(str, str, np.ndarray)
+    # Her karede üretilen görüntüyü (QImage formatında) ana pencereye aktarmak için sinyal
+    changePixmap = pyqtSignal(QImage)
 
     def __init__(self, video_path, parent=None):
         super(VideoThread, self).__init__(parent)
@@ -56,7 +58,9 @@ class VideoThread(QThread):
             if self.last_plate is not None and current_time - self.last_detection_time > self.reset_delay:
                 self.last_plate = None
 
-            # YOLO modelini kullanarak plaka tespiti yap
+            # ---------------------------
+            # 1) YOLO modelini kullanarak plaka tespiti yap
+            # ---------------------------
             results = self.model(frame)
             for result in results:
                 if result.boxes is not None:
@@ -64,7 +68,7 @@ class VideoThread(QThread):
                     for box in boxes:
                         x1, y1, x2, y2 = map(int, box[:4])
                         # Sağ ve sol kenarlardan kırpma yapılıyor
-                        plate_region1= frame[y1:y2, x1:x2]
+                        plate_region1 = frame[y1:y2, x1:x2]
                         new_x1 = max(x1 + 10, 0)
                         new_x2 = min(x2 - 7, frame.shape[1])
                         plate_region = frame[y1:y2, new_x1:new_x2]
@@ -80,27 +84,34 @@ class VideoThread(QThread):
                                 self.last_plate = plate_text
                                 self.last_detection_time = current_time
                                 
-                                # Araç tipi tespiti: tüm frame üzerinde yapılan tespit sonucu araç tipi ve konum bilgisi alınıyor.
+                                # 2) Araç tipi tespiti: tüm frame üzerinde yapılan tespit
                                 vehicle_type, vehicle_box = detect_vehicle_type(frame)
                                 
-                                # Plaka bölgesine dikdörtgen çizimi ve OCR sonucu ekleme (yeşil renk)
+                                # 3) Anotasyon: Plaka bölgesine dikdörtgen çizimi
                                 cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 255, 0), 2)
                                 cv2.putText(frame, plate_text, (new_x1, y1 - 20), 
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 255, 0), 2)
                                 
-                                # Eğer araç tespit edilebildiyse, tespit edilen aracın etrafına mavi dikdörtgen çiziliyor.
+                                # 4) Araç tipi tespit edilebildiyse, mavi dikdörtgen çiziliyor.
                                 if vehicle_box is not None:
                                     x1_v, y1_v, x2_v, y2_v = vehicle_box
                                     cv2.rectangle(frame, (x1_v, y1_v), (x2_v, y2_v), (255, 0, 0), 2)
                                     cv2.putText(frame, vehicle_type, (x1_v, y1_v - 10), 
                                                 cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 0, 0), 2)
                                 
-                                # Sinyal gönder: plaka metni, araç tipi ve orijinal (kırpılmış) plaka görüntüsü
+                                # 5) Sinyal gönder: plaka metni, araç tipi ve orijinal (kırpılmış) plaka görüntüsü
                                 self.plateDetected.emit(plate_text, vehicle_type, plate_region1)
-            # Anotasyonları içeren frame görüntüleniyor
-            cv2.imshow("Video", frame)
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
+
+            # ---------------------------
+            # 6) Kareyi PyQt5 arayüzüne aktarma
+            # ---------------------------
+            # OpenCV formatından QImage formatına çeviriyoruz
+            rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+            h, w, ch = rgb_frame.shape
+            bytes_per_line = ch * w
+            qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format_RGB888)
+            # PyQt sinyaliyle ana pencereye gönder
+            self.changePixmap.emit(qt_image)
 
         cap.release()
         cv2.destroyAllWindows()
@@ -114,30 +125,60 @@ class MainWindow(QMainWindow):
     def __init__(self, video_path):
         super().__init__()
         self.setWindowTitle("Otopark Sistemi")
-        self.setGeometry(100, 100, 900, 600)
+        self.setGeometry(100, 100, 1200, 600)  # Genişliği biraz artırdık
 
-        # Tablonun sütun başlıkları
+        # ---------------------------
+        # 1) Arayüz Elemanları
+        # ---------------------------
+        # a) Video gösterimi için QLabel
+        self.video_label = QLabel()
+        self.video_label.setFixedSize(640, 360)  # İsteğe göre boyut
+        self.video_label.setStyleSheet("background-color: black;")  # Arka plan
+
+        # b) Tablonun sütun başlıkları
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(["Plaka", "Araç Tipi", "Giriş Zamanı", "Çıkış Zamanı", "Ücret (TL)", "Plaka Görüntüsü"])
         self.table.horizontalHeader().setStretchLastSection(True)
         self.table.setColumnWidth(5, 150)
 
-        # Çıkış yap butonu: seçili kayda çıkış zamanı ekler ve ücreti hesaplar
+        # c) Çıkış yap butonu
         self.exitButton = QPushButton("Çıkış Yap")
         self.exitButton.clicked.connect(self.register_exit)
 
-        layout = QVBoxLayout()
-        layout.addWidget(self.table)
-        layout.addWidget(self.exitButton)
+        # ---------------------------
+        # 2) Layout Ayarları
+        # ---------------------------
+        # Solda video, sağda tablo olacak şekilde yatay layout
+        h_layout = QHBoxLayout()
+        h_layout.addWidget(self.video_label, 1)  # solda video
+        h_layout.addWidget(self.table, 1)        # sağda tablo
+
+        # Butonu alta eklemek için dikey layout
+        v_layout = QVBoxLayout()
+        v_layout.addLayout(h_layout)
+        v_layout.addWidget(self.exitButton)
 
         container = QWidget()
-        container.setLayout(layout)
+        container.setLayout(v_layout)
         self.setCentralWidget(container)
 
-        # Video işleme thread'ini başlat
+        # ---------------------------
+        # 3) Video Thread başlatma
+        # ---------------------------
         self.video_thread = VideoThread(video_path)
+        # Plaka tespit sinyali -> tabloya ekleme fonksiyonu
         self.video_thread.plateDetected.connect(self.add_record)
+        # Frame sinyali -> video_label güncelleme fonksiyonu
+        self.video_thread.changePixmap.connect(self.updateImage)
         self.video_thread.start()
+
+    def updateImage(self, qt_image):
+        """VideoThread'den gelen QImage'ı QLabel üzerinde gösterir."""
+        # Boyutu korumak veya ölçeklendirmek için scaled kullanabiliriz
+        pixmap = QPixmap.fromImage(qt_image).scaled(self.video_label.width(),
+                                                    self.video_label.height(),
+                                                    Qt.KeepAspectRatio)
+        self.video_label.setPixmap(pixmap)
 
     def add_record(self, plate_text, vehicle_type, plate_image):
         # Yeni bir satır ekle: plaka, araç tipi, giriş zamanı, boş çıkış, boş ücret, plaka görüntüsü
@@ -182,7 +223,7 @@ class MainWindow(QMainWindow):
         exit_time_str = exit_time.strftime("%Y-%m-%d %H:%M:%S")
         self.table.setItem(row, 3, QTableWidgetItem(exit_time_str))
 
-        # Ücret hesaplama (örnek: saatlik 5 TL)
+        # Ücret hesaplama (örnek: saatlik 60 TL)
         duration = (exit_time - entry_time).total_seconds() / 3600
         fee = 60 * duration
         self.table.setItem(row, 4, QTableWidgetItem("{:.2f}".format(fee)))
