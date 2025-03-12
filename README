@@ -1,0 +1,18 @@
+Otopark Sistemi (Plaka ve Araç Tipi Tanıma)
+Bu proje, YOLOv8 tabanlı bir plaka tespit modeli (kullanıcıya ait özel eğitimli model) ve hazır bir araç tespit modeli (yolov8l.pt) kullanarak videodaki araçların plakalarını ve araç tiplerini tanır. PyQt5 arayüzüyle tespit edilen plaka ve araç bilgilerini anlık olarak bir tabloda görüntüler, plaka görüntüsünü kaydeder ve giriş-çıkış zamanlarıyla birlikte otopark ücreti hesaplaması yapar.
+(Kendi ekran görüntünüzü veya paylaştığınız resmi buraya ekleyebilirsiniz.)
+Özellikler
+•	Gerçek zamanlı veya video üzerinden plaka tespiti: YOLOv8 modeliyle plaka bölgesi tespit edilir.
+•	OCR ile plaka okuma: Tespit edilen plaka bölgesinden pytesseract kullanılarak metin okunur.
+•	Araç tipi tespiti: Farklı bir YOLOv8 modeli (yolov8l.pt) ile aracın tipi tanımlanır (ör. “car”, “truck”, vb.).
+•	Otopark kayıt takibi: PyQt5 arayüzünde, tespit edilen plaka, araç tipi, giriş zamanı, çıkış zamanı ve ücret bilgileri listelenir.
+•	Ücret hesaplama: Çıkış zamanı geldiğinde, giriş-çıkış saati farkına göre belirlenmiş bir saatlik ücret üzerinden toplam ödeme hesaplanır.
+Gereksinimler
+•	Python 3.7+
+•	PyQt5 (GUI için)
+•	OpenCV (Görüntü işleme için)
+•	Ultralytics (YOLOv8 için)
+•	pytesseract (OCR için)
+•	Tesseract (Sisteminizde kurulu olması gerekir. Yükleme talimatları)
+Ayrıca, kendi eğitimli plaka tespit modelinizi (best.pt dosyası) ve araç tespit modeli olarak yolov8l.pt dosyasını proje dizinine yerleştirmelisiniz.
+
